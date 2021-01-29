@@ -36,6 +36,9 @@
        <layout class="QHBoxLayout" name="horizontalLayout_3">
         <item>
          <widget class="QLineEdit" name="lnExecutable">
+          <property name="readOnly">
+           <bool>true</bool>
+          </property>
           <property name="placeholderText">
            <string>Select executable...</string>
           </property>
