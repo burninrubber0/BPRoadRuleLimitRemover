@@ -1,0 +1,5 @@
+<RCC>
+    <qresource prefix="/BPRoadRuleLimitRemover">
+        <file>rrlr_icon.ico</file>
+    </qresource>
+</RCC>
