@@ -55,6 +55,9 @@
       </item>
       <item>
        <widget class="QCheckBox" name="chkTime">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
         <property name="text">
          <string>Remove minimum time limit</string>
         </property>
@@ -62,6 +65,9 @@
       </item>
       <item>
        <widget class="QCheckBox" name="chkShowtime">
+        <property name="enabled">
+         <bool>false</bool>
+        </property>
         <property name="text">
          <string>Remove maximum showtime limit</string>
         </property>
@@ -77,6 +83,9 @@
         </property>
         <item>
          <widget class="QPushButton" name="btnApply">
+          <property name="enabled">
+           <bool>false</bool>
+          </property>
           <property name="text">
            <string>Apply</string>
           </property>

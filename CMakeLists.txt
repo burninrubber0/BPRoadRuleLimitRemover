@@ -44,7 +44,7 @@ find_package(Qt6 COMPONENTS Core Gui Widgets REQUIRED)
 add_subdirectory(3rdparty/libbinaryio "${CMAKE_CURRENT_BINARY_DIR}/3rdparty/libbinaryio" EXCLUDE_FROM_ALL)
 target_include_directories(BPRoadRuleLimitRemover PRIVATE ${ROOT} "${CMAKE_CURRENT_BINARY_DIR}/3rdparty/libbinaryio" EXCLUDE_FROM_ALL)
 
-target_link_libraries(BPRoadRuleLimitRemover PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets)
+target_link_libraries(BPRoadRuleLimitRemover PRIVATE libbinaryio Qt6::Core Qt6::Gui Qt6::Widgets)
 
 # VS stuff
 set_property(DIRECTORY ${ROOT} PROPERTY VS_STARTUP_PROJECT BPRoadRuleLimitRemover)
