@@ -20,7 +20,7 @@ void RRLimitRemover::openFile()
 	if (!filePath.isEmpty())
 		tmpPath = filePath;
 	filePath = QFileDialog::getOpenFileName(this, tr("Select executable"), defaultPath,
-		tr("Executables (*.exe *.elf *.xex)"));
+		tr("Executables (*.exe *.elf *.xex);;Xbox DLLs (*.xed)"));
 	if (std::filesystem::exists(filePath.toStdString().c_str()))
 	{
 		ui.lnExecutable->setText(filePath);
@@ -46,7 +46,6 @@ void RRLimitRemover::saveFile()
 	std::ifstream in;
 	std::ofstream out;
 
-	// Open executable, copy to backup, output backup, mod, output mod
 	// Write backup
 	QString backupPath = filePath + ".bck";
 	if (!std::filesystem::exists(backupPath.toStdString().c_str()))
@@ -76,13 +75,16 @@ void RRLimitRemover::saveFile()
 	in.close();
 
 	// Mod executable and write
-	modifyFile(fileSize, reader, writer);
-	out.open(filePath.toStdString(), std::ios::out | std::ios::binary);
-	out << writer.GetStream().rdbuf();
-	out.close();
+	if (!modifyFile(fileSize, reader, writer))
+	{
+		out.open(filePath.toStdString(), std::ios::out | std::ios::binary);
+		out << writer.GetStream().rdbuf();
+		out.close();
 
-	QMessageBox::information(this, "Modification Complete", "Road Rule limits removed successfully!",
-		QMessageBox::Ok, QMessageBox::NoButton);
+		QMessageBox::information(this, "Modification Complete",
+			"Road Rule limits removed successfully!",
+			QMessageBox::Ok, QMessageBox::NoButton);
+	}
 }
 
 void RRLimitRemover::determineIfChecked()
@@ -112,7 +114,7 @@ void RRLimitRemover::connectActions()
 }
 
 // Determine platform, version, 
-void RRLimitRemover::modifyFile(uint64_t fsize, binaryio::BinaryReader &reader, binaryio::BinaryWriter &writer)
+bool RRLimitRemover::modifyFile(uint64_t fsize, binaryio::BinaryReader &reader, binaryio::BinaryWriter &writer)
 {
 	reader.Seek(0);
 	uint64_t head = reader.Read<uint64_t>();
@@ -125,6 +127,7 @@ void RRLimitRemover::modifyFile(uint64_t fsize, binaryio::BinaryReader &reader, 
 	{
 		switch (fsize)
 		{
+		// *** PC versions ***
 		case 0x11FB510: // Securom 1.0.0.0
 		case 0x11FE510: // Securom 1.0.0.1
 			minLimitsOffset = 0x6599F4;
@@ -141,7 +144,227 @@ void RRLimitRemover::modifyFile(uint64_t fsize, binaryio::BinaryReader &reader, 
 			minLimitsOffset = 0xADDF08;
 			maxLimitsOffset = 0xADDF00;
 			break;
+
+		// *** PS3 versions ***
+		// V1.0
+		case 0xCD6F00: // BLAS50039 1.0, BLUS30061 1.0
+		case 0xCD6F18: // BLES00073 1.0
+			reader.Seek(0x8F9D8C);
+			if (reader.Read<uint32_t>() == 600000) // Is BLAS50039/BLES00073
+			{
+				minLimitsOffset = 0x8F9D94;
+				maxLimitsOffset = 0x8F9D8C;
+			}
+			else // Is BLUS30061
+			{
+				minLimitsOffset = 0x8F9DB4;
+				maxLimitsOffset = 0x8F9DAC;
+			}
+			break;
+		case 0xD0F098: // BLES00074 1.0
+			minLimitsOffset = 0x8F9F74;
+			maxLimitsOffset = 0x8F9F6C;
+			break;
+		case 0xD0F118: // BLJM60053 1.0
+			minLimitsOffset = 0x8F9FB4;
+			maxLimitsOffset = 0x8F9FAC;
+			break;
+
+		// V1.3
+		case 0xDE8058: // All 1.3
+			minLimitsOffset = 0x963040;
+			maxLimitsOffset = 0x963038;
+			break;
+
+		// V1.4
+		case 0xDC9978: // Disc 1.4
+			minLimitsOffset = 0x969B74;
+			maxLimitsOffset = 0x969B6C;
+			break;
+		case 0xDCA208: // PSN 1.4
+			minLimitsOffset = 0x969384;
+			maxLimitsOffset = 0x96937C;
+			break;
+
+		// V1.5
+		case 0xDC95C0: // Disc 1.5
+			minLimitsOffset = 0x964BBC;
+			maxLimitsOffset = 0x964BB4;
+			break;
+		case 0xDC9F50: // PSN 1.5
+			minLimitsOffset = 0x9651D4;
+			maxLimitsOffset = 0x9651CC;
+			break;
+
+		// V1.6
+		case 0xDD7478: // All 1.6
+			minLimitsOffset = 0x98BA38;
+			maxLimitsOffset = 0x98BA40;
+			break;
+
+		// V1.7
+		case 0xDF4698: // All 1.7
+			minLimitsOffset = 0x9803BC;
+			maxLimitsOffset = 0x9803C4;
+			break;
+
+		// V1.8
+		case 0xE05738: // All 1.8
+			minLimitsOffset = 0x9901FC;
+			maxLimitsOffset = 0x990204;
+			break;
+
+		// V1.9
+		case 0xE282B8: // All 1.9
+			minLimitsOffset = 0x9B0330;
+			maxLimitsOffset = 0x9B0338;
+			break;
+
+		// *** PS4 versions ***
+		case 0x17EB75D: // All 1.00
+			minLimitsOffset = 0xF3A304;
+			maxLimitsOffset = 0xF3A30C;
+			break;
+		case 0x174901D: // All 1.01
+			minLimitsOffset = 0xEE47C4;
+			maxLimitsOffset = 0xEE47CC;
+			break;
+		case 0x17490BD: // All 1.02
+			minLimitsOffset = 0xEE4AA4;
+			maxLimitsOffset = 0xEE4AAC;
+			break;
+		case 0x174559D: // All 1.03
+			minLimitsOffset = 0xEE39E4;
+			maxLimitsOffset = 0xEE39EC;
+			break;
+
+		default:
+			QMessageBox::critical(this, "Unrecognized executable",
+				"Executable not recognized. Did you remember to decrypt?",
+				QMessageBox::Ok, QMessageBox::NoButton);
+			return true;
 		}
+	}
+
+	// *** Xbox 360 versions ***
+	else if (reader.Read<uint32_t>() == xexHdr)
+	{
+		// If encrypted or compressed, error, else mod
+		reader.Seek(0x14);
+		int defCount = reader.Read<int>();
+		int baseFileFmtOffset = 0;
+		for (int i = 0; i < defCount; ++i)
+		{
+			if (reader.Read<int>() == 0x3FF)
+			{
+				baseFileFmtOffset = reader.Read<int>();
+				break;
+			}
+		}
+		reader.Seek(baseFileFmtOffset + 4);
+		if ((reader.Read<uint32_t>() & 0xF0000) == 1 // Encrypted
+		&& (reader.Read<uint32_t>() & 0xF) == 2) // Compressed
+		{
+		QMessageBox::critical(this, "Error: Encryption/compression encountered",
+			"File is encrypted and compressed. Please decrypt and decompress before modding.",
+			QMessageBox::Ok, QMessageBox::NoButton);
+		return true;
+		}
+		else if ((reader.Read<uint32_t>() & 0xF0000) == 1) // Encrypted
+		{
+			QMessageBox::critical(this, "Error: Encryption encountered",
+				"File is encrypted. Please decrypt before modding.",
+				QMessageBox::Ok, QMessageBox::NoButton);
+			return true;
+		}
+		else if ((reader.Read<uint32_t>() & 0xF) == 2) // Compressed
+		{
+			QMessageBox::critical(this, "Error: Compression encountered",
+				"File is compressed. Please decompress before modding.",
+				QMessageBox::Ok, QMessageBox::NoButton);
+			return true;
+		}
+		else if ((reader.Read<uint32_t>() & 0xF0000) == 0 // Unencrypted
+			&& (reader.Read<uint32_t>() & 0xF) == 1) // Uncompressed
+		{
+			switch (fsize)
+			{
+			case 0xB6B000: // 20B57926 (V2, NTSC), 1B7D0C5B (V1, PAL)
+				minLimitsOffset = 0xC4284;
+				maxLimitsOffset = 0xC428C;
+				break;
+			case 0xB73000: // 1E51ADC2 (V7, NTSC-J)
+				minLimitsOffset = 0xC4274;
+				maxLimitsOffset = 0xC427C;
+				break;
+			case 0xBBB000: // 2B99A9CE (V4, NTSC-J)
+				minLimitsOffset = 0xC430C;
+				maxLimitsOffset = 0xC4314;
+				break;
+			case 0xBB3000: // 24EF448B (V5, PAL)
+				minLimitsOffset = 0xC428C;
+				maxLimitsOffset = 0xC4294;
+				break;
+			case 0xB93000: // 2B99A9CE (V8, All - TUB)
+				minLimitsOffset = 0xC511C;
+				maxLimitsOffset = 0xC5124;
+				break;
+			case 0xBD3000: // V1.4 update
+				minLimitsOffset = 0xD2AA4;
+				maxLimitsOffset = 0xD2AAC;
+				break;
+			case 0xC1B000: // V1.6 update
+				minLimitsOffset = 0xD3FEC;
+				maxLimitsOffset = 0xD3FF4;
+				break;
+			case 0xC23000: // V1.7 update
+				minLimitsOffset = 0xD4024;
+				maxLimitsOffset = 0xD402C;
+				break;
+			case 0xC33000: // V1.8 update
+				minLimitsOffset = 0xD4254;
+				maxLimitsOffset = 0xD425C;
+				break;
+			case 0xC53000: // V1.9 update
+				minLimitsOffset = 0xD421C;
+				maxLimitsOffset = 0xD4224;
+				break;
+			}
+		}
+		else
+		{
+			QMessageBox::critical(this, "Unrecognized base file format",
+				"Cannot determine if executable is encrypted/compressed. Operation halted.",
+				QMessageBox::Ok, QMessageBox::NoButton);
+			return true;
+		}
+	}
+
+	// Encrypted PS3 elfs
+	else if (reader.Read<uint64_t>() == certFileHdrPs3)
+	{
+		QMessageBox::critical(this, "Executable encrypted",
+			"The executable is encrypted. Please decrypt using TrueAncestor's SELF Resigner.",
+			QMessageBox::Ok, QMessageBox::NoButton);
+		return true;
+	}
+
+	// Switch NSOs
+	else if (reader.Read<uint64_t>() == nsoHdr)
+	{
+		QMessageBox::critical(this, "Unsupported platform",
+			"Nintendo Switch versions are not supported at this time.",
+			QMessageBox::Ok, QMessageBox::NoButton);
+		return true;
+	}
+
+	// Unrecognized
+	else
+	{
+		QMessageBox::critical(this, "Unrecognized file",
+			"Executable not recognized. Please select a valid executable.",
+			QMessageBox::Ok, QMessageBox::NoButton);
+		return true;
 	}
 
 	// Write changes
@@ -149,17 +372,21 @@ void RRLimitRemover::modifyFile(uint64_t fsize, binaryio::BinaryReader &reader, 
 	{
 		reader.Seek(minLimitsOffset);
 		if (reader.Read<uint32_t>() == MinTime
+			|| reader.Read<uint32_t>() == MinTimeV10
 			|| reader.Read<uint32_t>() == MaxTime
 			|| reader.Read<uint32_t>() == MaxTimeRM)
 			writer.VisitAndWrite<uint64_t>(minLimitsOffset, 0); // Time/Showtime minimum = 0
 	}
 	if (ui.chkShowtime->isChecked())
 	{
+		reader.Seek(maxLimitsOffset);
 		if (reader.Read<uint32_t>() == MinShowtime
 			|| reader.Read<uint32_t>() == MaxShowtime)
 			// Not sure whether it's signed, this will have to do
 			writer.VisitAndWrite<uint64_t>(maxLimitsOffset, 0x7FFFFFFF7FFFFFFF); // Time/Showtime maximum = 2147483647
 	}
+
+	return false;
 }
 
 // ***** Constructors *****
