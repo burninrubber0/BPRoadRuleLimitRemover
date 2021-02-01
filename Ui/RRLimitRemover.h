@@ -20,16 +20,14 @@ public:
 private:
 	Ui::BPRRLimitRemover ui;
 
-	QString defaultPath = QStandardPaths::standardLocations(QStandardPaths::ApplicationsLocation).at(0);
+	QString defaultPath = "C:/Program Files (x86)/Origin Games";
 	QString filePath;
 
 	// Headers for platform detection
-	uint64_t certFileHdrPs3 = 0x0200000000454353; // Certified file (PS3)
-	uint64_t elfHdrPs3 = 0x7F454C4602020166; // ELF (PS3)
-	uint64_t elfHdrPs4 = 0x09010102464C457F; // ELF (PS4)
-	uint32_t xexHdr = 0x58455832; // XEX (X360)
+	uint64_t elfHdrPs3 = 0x66010202464C457F; // ELF (PS3)
+	uint64_t elfHdrPs4 = 0x9010102464C457F; // ELF (PS4)
+	uint32_t xexHdr = 0x32584558; // XEX (X360)
 	uint16_t exeHdr = 0x5A4D; // EXE (PC)
-	uint64_t nsoHdr = 0x00000000304F534E; // NSO (Switch)
 
 	enum Limits : uint32_t
 	{
@@ -42,11 +40,11 @@ private:
 	};
 
 	void connectActions();
-	bool modifyFile(uint64_t fsize, binaryio::BinaryReader &reader, binaryio::BinaryWriter &writer);
+	bool modifyFile(uint64_t head, uint64_t fsize, binaryio::BinaryReader &reader, binaryio::BinaryWriter &writer);
 
 private slots:
 	void openFile();
 	void determineIfChecked();
-	void saveFile();
+	bool saveFile();
 	void quitRRLR();
 };

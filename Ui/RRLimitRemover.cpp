@@ -20,7 +20,7 @@ void RRLimitRemover::openFile()
 	if (!filePath.isEmpty())
 		tmpPath = filePath;
 	filePath = QFileDialog::getOpenFileName(this, tr("Select executable"), defaultPath,
-		tr("Executables (*.exe *.elf *.xex);;Xbox DLLs (*.xed)"));
+		tr("Executables (*.exe *.elf *.xex *.bin);;Xbox DLLs (*.xed);;All Files (*.*)"));
 	if (std::filesystem::exists(filePath.toStdString().c_str()))
 	{
 		ui.lnExecutable->setText(filePath);
@@ -41,50 +41,133 @@ void RRLimitRemover::openFile()
 }
 
 // Save modified executable
-void RRLimitRemover::saveFile()
+bool RRLimitRemover::saveFile()
 {
 	std::ifstream in;
 	std::ofstream out;
-
-	// Write backup
-	QString backupPath = filePath + ".bck";
-	if (!std::filesystem::exists(backupPath.toStdString().c_str()))
-		std::filesystem::copy(filePath.toStdString().c_str(), backupPath.toStdString().c_str());
+	uint64_t head;
 
 	in.open(filePath.toStdString(), std::ios::in | std::ios::binary);
-	const uint64_t fileSize = std::filesystem::file_size(filePath.toStdString());
 
-	// Load file into reader and writer
-	const auto& buffer = std::make_shared<std::vector<uint8_t>>(fileSize);
-	in.read(reinterpret_cast<char*>(buffer->data()), fileSize);
-	auto reader = binaryio::BinaryReader(buffer);
-	auto writer = binaryio::BinaryWriter();
-	writer.Seek(0);
-	writer.Write(buffer->data(), buffer->size());
-
-	// Detect big endian
-	uint64_t head;
+	// Ensure executable is valid
 	in.seekg(0);
 	in.read(reinterpret_cast<char*>(&head), sizeof(head));
-	if ((head & 0xFFFFFFFF) == 0x32584558 || head == 0x66010202464C457F)
+	if (head == 0x200000000454353) // Certified file (PS3) LE
 	{
-		reader.SetBigEndian(true);
-		writer.SetBigEndian(true);
+		QMessageBox::critical(this, "Error: Encryption encountered",
+			"The executable is encrypted.<br>Please decrypt using TrueAncestor's SELF Resigner.",
+			QMessageBox::Ok, QMessageBox::NoButton);
+		return true;
+	}
+	else if (head == 0x304F534E) // NSO (Switch) LE
+	{
+		QMessageBox::critical(this, "Unsupported platform",
+			"Nintendo Switch versions are not supported at this time.",
+			QMessageBox::Ok, QMessageBox::NoButton);
+		return true;
+	}
+	else if ((head & 0xFFFF) == exeHdr // EXE (PC)
+		|| (head & 0xFFFFFFFF) == xexHdr // XEX (X360) LE
+		|| head == elfHdrPs3 // ELF (PS3) LE
+		|| head == elfHdrPs4) // ELF (PS4)
+	{
+		const uint64_t fileSize = std::filesystem::file_size(filePath.toStdString());
+
+		// Reader and writer
+		const auto& buffer = std::make_shared<std::vector<uint8_t>>(fileSize);
+		in.seekg(0);
+		in.read(reinterpret_cast<char*>(buffer->data()), fileSize);
+		auto reader = binaryio::BinaryReader(buffer);
+		auto writer = binaryio::BinaryWriter();
+		writer.Seek(0);
+		writer.Write(buffer->data(), buffer->size());
+
+		// Detect big endian
+		if ((head & 0xFFFFFFFF) == xexHdr || head == elfHdrPs3) // X360 or PS3
+		{
+			reader.SetBigEndian(true);
+			writer.SetBigEndian(true);
+		}
+
+		// Detect xex encryption/compression
+		if ((head & 0xFFFFFFFF) == xexHdr)
+		{
+			reader.Seek(0x14);
+			int defCount = reader.Read<int>();
+			int baseFileFmtOffset = 0;
+			for (int i = 0; i < defCount; ++i)
+			{
+				reader.Seek(0x18 + (i * 4));
+				if (reader.Read<int>() == 0x3FF)
+				{
+					baseFileFmtOffset = reader.Read<int>();
+					break;
+				}
+			}
+			reader.Seek(baseFileFmtOffset + 4);
+			uint32_t baseFileFmt = reader.Read<uint32_t>();
+			if ((baseFileFmt & 0xF0000) != 0 // Unencrypted
+				&& (baseFileFmt & 0xF) != 1) // Uncompressed
+			{
+				if (((baseFileFmt & 0xF0000) >> 16) == 1 // Encrypted
+					&& (baseFileFmt & 0xF) == 2) // Compressed
+				{
+					QMessageBox::critical(this, "Error: Encryption/compression encountered",
+						"File is encrypted and compressed.<br>Please decrypt and decompress before modding.",
+						QMessageBox::Ok, QMessageBox::NoButton);
+					return true;
+				}
+				else if (((baseFileFmt & 0xF0000) >> 16) == 1) // Encrypted
+				{
+					QMessageBox::critical(this, "Error: Encryption encountered",
+						"File is encrypted.<br>Please decrypt before modding.",
+						QMessageBox::Ok, QMessageBox::NoButton);
+					return true;
+				}
+				else if ((baseFileFmt & 0xF) == 2) // Compressed
+				{
+					QMessageBox::critical(this, "Error: Compression encountered",
+						"File is compressed.<br>Please decompress before modding.",
+						QMessageBox::Ok, QMessageBox::NoButton);
+					return true;
+				}
+				else
+				{
+					QMessageBox::critical(this, "Unrecognized base file format",
+						"Cannot determine if executable is encrypted/compressed.<br>Operation halted.",
+						QMessageBox::Ok, QMessageBox::NoButton);
+					return true;
+				}
+			}
+		}
+
+		// Write backup
+		QString backupPath = filePath + ".bck";
+		if (!std::filesystem::exists(backupPath.toStdString().c_str()))
+			std::filesystem::copy(filePath.toStdString().c_str(), backupPath.toStdString().c_str());
+
+		// Mod executable and write
+		if (!modifyFile(head, fileSize, reader, writer))
+		{
+			out.open(filePath.toStdString(), std::ios::out | std::ios::binary);
+			out << writer.GetStream().rdbuf();
+			out.close();
+
+			QMessageBox::information(this, "Modification Complete",
+				"Road Rule limits removed successfully!", QMessageBox::Ok);
+		}
+	}
+	else // Unrecognized
+	{
+		QMessageBox::critical(this, "Unrecognized file",
+			"Executable not recognized.<br>Please select a valid executable.",
+			QMessageBox::Ok, QMessageBox::NoButton);
+		return true;
 	}
 
 	in.close();
 
-	// Mod executable and write
-	if (!modifyFile(fileSize, reader, writer))
-	{
-		out.open(filePath.toStdString(), std::ios::out | std::ios::binary);
-		out << writer.GetStream().rdbuf();
-		out.close();
-
-		QMessageBox::information(this, "Modification Complete",
-			"Road Rule limits removed successfully!",
-			QMessageBox::Ok, QMessageBox::NoButton);
-	}
+	return false;
 }
 
 void RRLimitRemover::determineIfChecked()
@@ -114,10 +197,9 @@ void RRLimitRemover::connectActions()
 }
 
 // Determine platform, version, 
-bool RRLimitRemover::modifyFile(uint64_t fsize, binaryio::BinaryReader &reader, binaryio::BinaryWriter &writer)
+bool RRLimitRemover::modifyFile(uint64_t head, uint64_t fsize, binaryio::BinaryReader &reader, binaryio::BinaryWriter &writer)
 {
 	reader.Seek(0);
-	uint64_t head = reader.Read<uint64_t>();
 	off_t minLimitsOffset = 0;
 	off_t maxLimitsOffset = 0;
 
@@ -240,129 +322,70 @@ bool RRLimitRemover::modifyFile(uint64_t fsize, binaryio::BinaryReader &reader, 
 
 		default:
 			QMessageBox::critical(this, "Unrecognized executable",
-				"Executable not recognized. Did you remember to decrypt?",
+				"Executable not recognized.<br>Did you remember to decrypt?",
 				QMessageBox::Ok, QMessageBox::NoButton);
 			return true;
 		}
 	}
 
 	// *** Xbox 360 versions ***
-	else if (reader.Read<uint32_t>() == xexHdr)
+	else if ((head & 0xFFFFFFFF) == xexHdr)
 	{
-		// If encrypted or compressed, error, else mod
-		reader.Seek(0x14);
-		int defCount = reader.Read<int>();
-		int baseFileFmtOffset = 0;
-		for (int i = 0; i < defCount; ++i)
+		switch (fsize)
 		{
-			if (reader.Read<int>() == 0x3FF)
-			{
-				baseFileFmtOffset = reader.Read<int>();
-				break;
-			}
-		}
-		reader.Seek(baseFileFmtOffset + 4);
-		if ((reader.Read<uint32_t>() & 0xF0000) == 1 // Encrypted
-		&& (reader.Read<uint32_t>() & 0xF) == 2) // Compressed
-		{
-		QMessageBox::critical(this, "Error: Encryption/compression encountered",
-			"File is encrypted and compressed. Please decrypt and decompress before modding.",
-			QMessageBox::Ok, QMessageBox::NoButton);
-		return true;
-		}
-		else if ((reader.Read<uint32_t>() & 0xF0000) == 1) // Encrypted
-		{
-			QMessageBox::critical(this, "Error: Encryption encountered",
-				"File is encrypted. Please decrypt before modding.",
-				QMessageBox::Ok, QMessageBox::NoButton);
-			return true;
-		}
-		else if ((reader.Read<uint32_t>() & 0xF) == 2) // Compressed
-		{
-			QMessageBox::critical(this, "Error: Compression encountered",
-				"File is compressed. Please decompress before modding.",
-				QMessageBox::Ok, QMessageBox::NoButton);
-			return true;
-		}
-		else if ((reader.Read<uint32_t>() & 0xF0000) == 0 // Unencrypted
-			&& (reader.Read<uint32_t>() & 0xF) == 1) // Uncompressed
-		{
-			switch (fsize)
-			{
-			case 0xB6B000: // 20B57926 (V2, NTSC), 1B7D0C5B (V1, PAL)
-				minLimitsOffset = 0xC4284;
-				maxLimitsOffset = 0xC428C;
-				break;
-			case 0xB73000: // 1E51ADC2 (V7, NTSC-J)
-				minLimitsOffset = 0xC4274;
-				maxLimitsOffset = 0xC427C;
-				break;
-			case 0xBBB000: // 2B99A9CE (V4, NTSC-J)
-				minLimitsOffset = 0xC430C;
-				maxLimitsOffset = 0xC4314;
-				break;
-			case 0xBB3000: // 24EF448B (V5, PAL)
-				minLimitsOffset = 0xC428C;
-				maxLimitsOffset = 0xC4294;
-				break;
-			case 0xB93000: // 2B99A9CE (V8, All - TUB)
-				minLimitsOffset = 0xC511C;
-				maxLimitsOffset = 0xC5124;
-				break;
-			case 0xBD3000: // V1.4 update
-				minLimitsOffset = 0xD2AA4;
-				maxLimitsOffset = 0xD2AAC;
-				break;
-			case 0xC1B000: // V1.6 update
-				minLimitsOffset = 0xD3FEC;
-				maxLimitsOffset = 0xD3FF4;
-				break;
-			case 0xC23000: // V1.7 update
-				minLimitsOffset = 0xD4024;
-				maxLimitsOffset = 0xD402C;
-				break;
-			case 0xC33000: // V1.8 update
-				minLimitsOffset = 0xD4254;
-				maxLimitsOffset = 0xD425C;
-				break;
-			case 0xC53000: // V1.9 update
-				minLimitsOffset = 0xD421C;
-				maxLimitsOffset = 0xD4224;
-				break;
-			}
-		}
-		else
-		{
-			QMessageBox::critical(this, "Unrecognized base file format",
-				"Cannot determine if executable is encrypted/compressed. Operation halted.",
+		case 0xB6B000: // 20B57926 (V2, NTSC), 1B7D0C5B (V1, PAL)
+			minLimitsOffset = 0xC4284;
+			maxLimitsOffset = 0xC428C;
+			break;
+		case 0xB73000: // 1E51ADC2 (V7, NTSC-J)
+			minLimitsOffset = 0xC4274;
+			maxLimitsOffset = 0xC427C;
+			break;
+		case 0xBBB000: // 2B99A9CE (V4, NTSC-J)
+			minLimitsOffset = 0xC430C;
+			maxLimitsOffset = 0xC4314;
+			break;
+		case 0xBB3000: // 24EF448B (V5, PAL)
+			minLimitsOffset = 0xC428C;
+			maxLimitsOffset = 0xC4294;
+			break;
+		case 0xB93000: // 2B99A9CE (V8, All - TUB)
+			minLimitsOffset = 0xC511C;
+			maxLimitsOffset = 0xC5124;
+			break;
+		case 0xBD3000: // V1.4 update
+			minLimitsOffset = 0xD2AA4;
+			maxLimitsOffset = 0xD2AAC;
+			break;
+		case 0xC1B000: // V1.6 update
+			minLimitsOffset = 0xD3FEC;
+			maxLimitsOffset = 0xD3FF4;
+			break;
+		case 0xC23000: // V1.7 update
+			minLimitsOffset = 0xD4024;
+			maxLimitsOffset = 0xD402C;
+			break;
+		case 0xC33000: // V1.8 update
+			minLimitsOffset = 0xD4254;
+			maxLimitsOffset = 0xD425C;
+			break;
+		case 0xC53000: // V1.9 update
+			minLimitsOffset = 0xD421C;
+			maxLimitsOffset = 0xD4224;
+			break;
+		default:
+			QMessageBox::critical(this, "Unrecognized executable",
+				"Executable not recognized.<br>Did you remember to decrypt/decompress?",
 				QMessageBox::Ok, QMessageBox::NoButton);
 			return true;
 		}
 	}
-
-	// Encrypted PS3 elfs
-	else if (reader.Read<uint64_t>() == certFileHdrPs3)
-	{
-		QMessageBox::critical(this, "Executable encrypted",
-			"The executable is encrypted. Please decrypt using TrueAncestor's SELF Resigner.",
-			QMessageBox::Ok, QMessageBox::NoButton);
-		return true;
-	}
-
-	// Switch NSOs
-	else if (reader.Read<uint64_t>() == nsoHdr)
-	{
-		QMessageBox::critical(this, "Unsupported platform",
-			"Nintendo Switch versions are not supported at this time.",
-			QMessageBox::Ok, QMessageBox::NoButton);
-		return true;
-	}
-
+	
 	// Unrecognized
 	else
 	{
-		QMessageBox::critical(this, "Unrecognized file",
-			"Executable not recognized. Please select a valid executable.",
+		QMessageBox::critical(this, "Unrecognized executable",
+			"Executable not recognized.<br>Please select a valid executable.",
 			QMessageBox::Ok, QMessageBox::NoButton);
 		return true;
 	}
