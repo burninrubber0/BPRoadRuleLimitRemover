@@ -40,9 +40,11 @@ void RRLimitRemover::openFile()
 	}
 }
 
-// Save modified executable
+// Detect executable type and save if no errors
 bool RRLimitRemover::saveFile()
 {
+	log("I: Started...");
+
 	std::ifstream in;
 	std::ofstream out;
 	uint64_t head;
@@ -54,6 +56,7 @@ bool RRLimitRemover::saveFile()
 	in.read(reinterpret_cast<char*>(&head), sizeof(head));
 	if (head == 0x200000000454353) // Certified file (PS3) LE
 	{
+		log("E: Encryption encountered");
 		QMessageBox::critical(this, "Error: Encryption encountered",
 			"The executable is encrypted.<br>Please decrypt using TrueAncestor's SELF Resigner.",
 			QMessageBox::Ok, QMessageBox::NoButton);
@@ -61,6 +64,7 @@ bool RRLimitRemover::saveFile()
 	}
 	else if (head == 0x304F534E) // NSO (Switch) LE
 	{
+		log("E: Unsupported platform: Switch");
 		QMessageBox::critical(this, "Unsupported platform",
 			"Nintendo Switch versions are not supported at this time.",
 			QMessageBox::Ok, QMessageBox::NoButton);
@@ -72,14 +76,17 @@ bool RRLimitRemover::saveFile()
 		|| head == elfHdrPs4) // ELF (PS4)
 	{
 		const uint64_t fileSize = std::filesystem::file_size(filePath.toStdString());
+		log("I: Size is " + QString::number(fileSize));
 
 		// Reader and writer
 		const auto& buffer = std::make_shared<std::vector<uint8_t>>(fileSize);
 		in.seekg(0);
+		log("I: Reading file...");
 		in.read(reinterpret_cast<char*>(buffer->data()), fileSize);
 		auto reader = binaryio::BinaryReader(buffer);
 		auto writer = binaryio::BinaryWriter();
 		writer.Seek(0);
+		log("I: Creating write buffer...");
 		writer.Write(buffer->data(), buffer->size());
 
 		// Detect big endian
@@ -112,6 +119,7 @@ bool RRLimitRemover::saveFile()
 				if (((baseFileFmt & 0xF0000) >> 16) == 1 // Encrypted
 					&& (baseFileFmt & 0xF) == 2) // Compressed
 				{
+					log("E: Encryption and compression encountered");
 					QMessageBox::critical(this, "Error: Encryption/compression encountered",
 						"File is encrypted and compressed.<br>Please decrypt and decompress before modding.",
 						QMessageBox::Ok, QMessageBox::NoButton);
@@ -119,6 +127,7 @@ bool RRLimitRemover::saveFile()
 				}
 				else if (((baseFileFmt & 0xF0000) >> 16) == 1) // Encrypted
 				{
+					log("E: Encryption encountered");
 					QMessageBox::critical(this, "Error: Encryption encountered",
 						"File is encrypted.<br>Please decrypt before modding.",
 						QMessageBox::Ok, QMessageBox::NoButton);
@@ -126,6 +135,7 @@ bool RRLimitRemover::saveFile()
 				}
 				else if ((baseFileFmt & 0xF) == 2) // Compressed
 				{
+					log("E: Compression encountered");
 					QMessageBox::critical(this, "Error: Compression encountered",
 						"File is compressed.<br>Please decompress before modding.",
 						QMessageBox::Ok, QMessageBox::NoButton);
@@ -133,6 +143,7 @@ bool RRLimitRemover::saveFile()
 				}
 				else
 				{
+					log("E: Unrecognized base file format");
 					QMessageBox::critical(this, "Unrecognized base file format",
 						"Cannot determine if executable is encrypted/compressed.<br>Operation halted.",
 						QMessageBox::Ok, QMessageBox::NoButton);
@@ -142,25 +153,32 @@ bool RRLimitRemover::saveFile()
 		}
 
 		// Write backup
+		log("I: Writing backup...");
 		QString backupPath = filePath + ".bck";
 		if (!std::filesystem::exists(backupPath.toStdString().c_str()))
 			std::filesystem::copy(filePath.toStdString().c_str(), backupPath.toStdString().c_str());
+		log("S: Backup written");
 
 		// Mod executable and write
 		if (!modifyFile(head, fileSize, reader, writer))
 		{
+			log("I: Writing modded file...");
 			out.open(filePath.toStdString(), std::ios::out | std::ios::binary);
 			out << writer.GetStream().rdbuf();
 			out.close();
+			log("S: Modification successful");
 
 			QMessageBox::information(this, "Modification Complete",
 				"Road Rule limits removed successfully!", QMessageBox::Ok);
 		}
+		else
+			log("E: Modification failed");
 	}
 	else // Unrecognized
 	{
+		log("E: Unrecognized file format");
 		QMessageBox::critical(this, "Unrecognized file",
-			"Executable not recognized.<br>Please select a valid executable.",
+			"File not recognized.<br>Please select a valid executable.",
 			QMessageBox::Ok, QMessageBox::NoButton);
 		return true;
 	}
@@ -170,6 +188,7 @@ bool RRLimitRemover::saveFile()
 	return false;
 }
 
+// Enable apply button if checked
 void RRLimitRemover::determineIfChecked()
 {
 	// Make sure mods are selected
@@ -196,9 +215,25 @@ void RRLimitRemover::connectActions()
 	connect(ui.chkShowtime, &QCheckBox::stateChanged, this, &RRLimitRemover::determineIfChecked);
 }
 
+// Log messages
+void RRLimitRemover::log(QString msg)
+{
+	ui.pteLog->appendPlainText(QTime::currentTime().toString() + " " + msg);
+	QApplication::processEvents();
+}
+
 // Determine platform, version, 
 bool RRLimitRemover::modifyFile(uint64_t head, uint64_t fsize, binaryio::BinaryReader &reader, binaryio::BinaryWriter &writer)
 {
+	if ((head & 0xFFFF) == exeHdr)
+		log("I: Platform is PC");
+	else if (head == elfHdrPs3)
+		log("I: Platform is PS3");
+	else if (head == elfHdrPs4)
+		log("I: Platform is PS4");
+	else if ((head & 0xFFFFFFFF) == xexHdr)
+		log("I: Platform is Xbox 360");
+
 	reader.Seek(0);
 	off_t minLimitsOffset = 0;
 	off_t maxLimitsOffset = 0;
@@ -321,6 +356,7 @@ bool RRLimitRemover::modifyFile(uint64_t head, uint64_t fsize, binaryio::BinaryR
 			break;
 
 		default:
+			log("E: Unrecognized executable");
 			QMessageBox::critical(this, "Unrecognized executable",
 				"Executable not recognized.<br>Did you remember to decrypt?",
 				QMessageBox::Ok, QMessageBox::NoButton);
@@ -374,6 +410,7 @@ bool RRLimitRemover::modifyFile(uint64_t head, uint64_t fsize, binaryio::BinaryR
 			maxLimitsOffset = 0xD4224;
 			break;
 		default:
+			log("E: Unrecognized executable");
 			QMessageBox::critical(this, "Unrecognized executable",
 				"Executable not recognized.<br>Did you remember to decrypt/decompress?",
 				QMessageBox::Ok, QMessageBox::NoButton);
@@ -384,11 +421,15 @@ bool RRLimitRemover::modifyFile(uint64_t head, uint64_t fsize, binaryio::BinaryR
 	// Unrecognized
 	else
 	{
+		log("E: Unrecognized or invalid executable");
 		QMessageBox::critical(this, "Unrecognized executable",
 			"Executable not recognized.<br>Please select a valid executable.",
 			QMessageBox::Ok, QMessageBox::NoButton);
 		return true;
 	}
+
+	log("I: Min limits at 0x" + QString::number(minLimitsOffset, 16).toUpper()
+		+ ", max limits at 0x" + QString::number(maxLimitsOffset, 16).toUpper());
 
 	// Write changes
 	if (ui.chkTime->isChecked())
@@ -399,6 +440,7 @@ bool RRLimitRemover::modifyFile(uint64_t head, uint64_t fsize, binaryio::BinaryR
 			|| reader.Read<uint32_t>() == MaxTime
 			|| reader.Read<uint32_t>() == MaxTimeRM)
 			writer.VisitAndWrite<uint64_t>(minLimitsOffset, 0); // Time/Showtime minimum = 0
+		log("I: Wrote new Time limits");
 	}
 	if (ui.chkShowtime->isChecked())
 	{
@@ -407,6 +449,7 @@ bool RRLimitRemover::modifyFile(uint64_t head, uint64_t fsize, binaryio::BinaryR
 			|| reader.Read<uint32_t>() == MaxShowtime)
 			// Not sure whether it's signed, this will have to do
 			writer.VisitAndWrite<uint64_t>(maxLimitsOffset, 0x7FFFFFFF7FFFFFFF); // Time/Showtime maximum = 2147483647
+		log("I: Wrote new Showtime limits");
 	}
 
 	return false;

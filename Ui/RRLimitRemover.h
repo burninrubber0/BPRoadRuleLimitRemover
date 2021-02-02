@@ -40,7 +40,20 @@ private:
 	};
 
 	void connectActions();
+	void log(QString msg);
 	bool modifyFile(uint64_t head, uint64_t fsize, binaryio::BinaryReader &reader, binaryio::BinaryWriter &writer);
+
+	void closeEvent(QCloseEvent* event)
+	{
+		// Create log file
+		std::ofstream log;
+		QString logPath = QApplication::applicationDirPath() + "/RRLR.log";
+		log.open(logPath.toStdString(), std::ios::out);
+		log << ui.pteLog->toPlainText().toStdString();
+		log.close();
+
+		event->accept();
+	}
 
 private slots:
 	void openFile();
