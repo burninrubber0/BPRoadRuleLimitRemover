@@ -222,7 +222,7 @@ void RRLimitRemover::log(QString msg)
 	QApplication::processEvents();
 }
 
-// Determine platform, version, 
+// Determine platform and version
 bool RRLimitRemover::modifyFile(uint64_t head, uint64_t fsize, binaryio::BinaryReader &reader, binaryio::BinaryWriter &writer)
 {
 	if ((head & 0xFFFF) == exeHdr)
@@ -431,25 +431,44 @@ bool RRLimitRemover::modifyFile(uint64_t head, uint64_t fsize, binaryio::BinaryR
 	log("I: Min limits at 0x" + QString::number(minLimitsOffset, 16).toUpper()
 		+ ", max limits at 0x" + QString::number(maxLimitsOffset, 16).toUpper());
 
-	// Write changes
+	// Write new minimums
+	// Actually only alters time
 	if (ui.chkTime->isChecked())
 	{
 		reader.Seek(minLimitsOffset);
-		if (reader.Read<uint32_t>() == MinTime
-			|| reader.Read<uint32_t>() == MinTimeV10
-			|| reader.Read<uint32_t>() == MaxTime
-			|| reader.Read<uint32_t>() == MaxTimeRM)
-			writer.VisitAndWrite<uint64_t>(minLimitsOffset, 0); // Time/Showtime minimum = 0
-		log("I: Wrote new Time limits");
+		uint32_t tmp = reader.Read<uint32_t>();
+		if (tmp == MinTime || tmp == MinTimeV10)
+		{
+			writer.VisitAndWrite<uint64_t>(minLimitsOffset, 0); // Time/Showtime = 0
+			log("I: Wrote new Time limits");
+		}
+		else
+		{
+			log("E: Min limits do not match known minimums");
+			return true;
+		}
 	}
+	// Write new maximums
+	// Actually only alters showtime in OG
+	// Time is changed in last update of RM, plus PC and NX
 	if (ui.chkShowtime->isChecked())
 	{
 		reader.Seek(maxLimitsOffset);
-		if (reader.Read<uint32_t>() == MinShowtime
-			|| reader.Read<uint32_t>() == MaxShowtime)
+		uint32_t tmp = reader.Read<uint32_t>();
+		if (tmp == MaxTime || tmp == MaxTimeRM)
+		{
 			// Not sure whether it's signed, this will have to do
-			writer.VisitAndWrite<uint64_t>(maxLimitsOffset, 0x7FFFFFFF7FFFFFFF); // Time/Showtime maximum = 2147483647
-		log("I: Wrote new Showtime limits");
+			writer.Seek(maxLimitsOffset);
+			// High time limit causes issues, using normal one instead
+			writer.Write<uint32_t>(MaxTime); // Time = 10 mins
+			writer.Write<uint32_t>(0x77359400); // Showtime = 2 billion
+			log("I: Wrote new Showtime limits");
+		}
+		else
+		{
+			log("E: Max limits do not match known maximums");
+			return true;
+		}
 	}
 
 	return false;

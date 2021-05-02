@@ -75,7 +75,7 @@
          <bool>false</bool>
         </property>
         <property name="text">
-         <string>Remove maximum showtime limit</string>
+         <string>Raise maximum showtime limit</string>
         </property>
        </widget>
       </item>
