@@ -1,3 +1,12 @@
+### Archival note
+This repository has been archived due to issues pertaining to invalid scores. The most noticeable of these, though not the most important, is incorrect entries in Today's Best while online. Possible reasons for this include, among other things:
+
+- The values being used for more than just score limits
+- The method used to measure and/or validate scores being buggy
+- The netcode used to send/receive scores being buggy
+
+Following archival, there should be no allowed use of this tool in speedrunning or other moderated scoreboards unless the issues are resolved.
+
 # Burnout Paradise Road Rule Limit Remover
 Removes the minimum time limit of 2 seconds from Time Road Rules and raises the maximum score limit of $1000000000 on Showtime Road Rules to $2000000000 by modifying the game's executable.
 
